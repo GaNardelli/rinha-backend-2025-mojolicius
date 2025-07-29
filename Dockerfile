@@ -9,15 +9,16 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libexpat1-dev \
     libz-dev \
+    libpq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cpan App::cpanminus
 
-RUN cpanm --no-test Mojolicious Minion::Worker Mojo::Redis Minion Minion::Backend::Redis Mojo::UserAgent Mojo::IOLoop JSON
+RUN cpanm --no-test Mojolicious Mojo::Redis Mojo::UserAgent Mojo::IOLoop JSON Mojo::Pg DateTime
 
 EXPOSE 3000
 
-CMD ["morbo", "./scripts/PaymentHandler"]
+# CMD ["morbo", "./scripts/PaymentHandler"]
 # Usar em produção
-# CMD ["./scripts/PaymentHandler", "prefork", "-m", "production", "-l", "http://0.0.0.0:3000"]
+CMD ["./scripts/PaymentHandler", "prefork", "-m", "production", "-l", "http://0.0.0.0:3000"]

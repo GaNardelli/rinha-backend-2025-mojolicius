@@ -2,45 +2,63 @@
 use strict;
 use warnings;
 use Mojolicious::Lite -signatures;
+use JSON;
+use Scalar::Util qw(looks_like_number);
+use Mojo::Redis;
+use Mojo::Pg;
+use Data::Dumper;
 use Mojo::File qw(curfile);
 use lib curfile->dirname->sibling('lib')->to_string;
-use Controller::PaymentProcessor;
 
-plugin Minion => { Redis => 'redis://redis:6379' };
-
-get '/' => sub ($c) {
-  my $controller= Controller::PaymentProcessor->new();
-  $c->render(json=>{data => $controller->{test} ,status=>200});
-};
-
-# POST /payments
-# {
-#     "correlationId": "4a7901b8-7d26-4d9d-aa19-4dc1c7cf60b3",
-#     "amount": 19.90
-# }
+my $redis_url = defined($ENV{"APP_ENV"}) && $ENV{"APP_ENV"} eq 'docker' ? 'redis://redis:6379' : 'redis://localhost:6379';
+my $redis = Mojo::Redis->new($redis_url);
 
 post '/payments' => sub ($c) {
-  # pegar a requisição para processar o pagamento, e jogar para uma fila do redis.
-  $c->render(json => {data => 1, status => 200});
+  my $json_params = $c->req->json;
+  my $correlationId = $json_params->{'correlationId'};
+  my $amount = $json_params->{'amount'};
+  return $c->render(json => { error => 'Missing correlationId' }, status => 400) unless $correlationId;
+  return $c->render(json => { error => 'Missing correct amount' }, status => 500) if !looks_like_number($amount);
+  my $pubsub = $redis->pubsub;
+  my $db = $pubsub->db;
+  $db->lpush('payment_process_queue', JSON::encode_json {correlationId => $correlationId, amount => $amount}, sub {
+    my ($db, $err, $res) = @_;
+    return $c->render(json => { status => 'queued' }, status => 500) if $err;
+    $c->render(json => { status => 'queued' }, status => 200);
+  });
 };
 
-# GET /payments-summary?from=2020-07-10T12:34:56.000Z&to=2020-07-10T12:35:56.000Z
-# Retornar
-# HTTP 200 - Ok
-# {
-#     "default" : {
-#         "totalRequests": 43236,
-#         "totalAmount": 415542345.98
-#     },
-#     "fallback" : {
-#         "totalRequests": 423545,
-#         "totalAmount": 329347.34
-#     }
-# }
-
 get '/payments-summary' => sub ($c) {
-  # devolver os valores dos pagamentos
-  $c->render(json => {data => 1, status => 200});
+  my $from = defined $c->param('from') ? $c->param('from') : '';
+  my $to = defined $c->param('to') ?  $c->param('to') : '';
+  my $postgres = Mojo::Pg->new($ENV{"POSTGRES_DSN"});
+  my $database = $postgres->db;
+  my @binds;
+  my $query = "SELECT json_object_agg(processor, summary) AS result
+                FROM (
+                  SELECT 
+                    processor,
+                    json_build_object(
+                      'totalRequests', COUNT(*)::INT,
+                      'totalAmount', ROUND(SUM(amount)::numeric, 2)
+                    ) AS summary
+                  FROM payments
+                  WHERE 1=1
+                  ";
+  if (defined $from && $from ne '') {
+    push @binds, $from;
+    $query .= " AND requested_at >= ? ";
+  }
+  if (defined $to && $to ne '') {
+    push @binds, $to;
+    $query .= " AND requested_at <= ? ";
+  }
+  $query .= " GROUP BY processor
+                ) AS grouped";
+  my $result = $database->query($query, @binds)->hash;
+  my $parsed = eval { decode_json $result->{result} } || {};
+  # warn "Sent report: " . Dumper($parsed);
+  $c->render(json => $parsed, status => 200);
 };
 
 
