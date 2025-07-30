@@ -19,6 +19,4 @@ RUN cpanm --no-test Mojolicious Mojo::Redis Mojo::UserAgent Mojo::IOLoop JSON Mo
 
 EXPOSE 3000
 
-# CMD ["morbo", "./scripts/PaymentHandler"]
-# Usar em produção
-CMD ["./scripts/PaymentHandler", "prefork", "-m", "production", "-l", "http://0.0.0.0:3000"]
+CMD ["morbo", "./scripts/PaymentHandler"]

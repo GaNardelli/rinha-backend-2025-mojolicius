@@ -24,8 +24,8 @@ post '/payments' => sub ($c) {
   $db->lpush('payment_process_queue', JSON::encode_json {correlationId => $correlationId, amount => $amount}, sub {
     my ($db, $err, $res) = @_;
     return $c->render(json => { status => 'queued' }, status => 500) if $err;
-    $c->render(json => { status => 'queued' }, status => 200);
   });
+  $c->render(json => { status => 'queued' }, status => 200);
 };
 
 get '/payments-summary' => sub ($c) {
