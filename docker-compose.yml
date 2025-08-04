@@ -3,8 +3,6 @@ services:
     build: .
     ports:
       - 3001:3000
-    volumes:
-      - ./:/opt
     networks:
       - backend
       - payment-processor
@@ -26,7 +24,7 @@ services:
       resources:
         limits:
           cpus: '0.25'
-          memory: '60MB'
+          memory: '65MB'
 
   api2:
     <<: *api
@@ -35,8 +33,6 @@ services:
 
   worker_light:
     build: .
-    volumes:
-      - ./:/opt
     depends_on:
       redis:
         condition: service_healthy
@@ -56,8 +52,6 @@ services:
 
   worker_heavy:
     build: .
-    volumes:
-      - ./:/opt
     depends_on:
       redis:
         condition: service_healthy

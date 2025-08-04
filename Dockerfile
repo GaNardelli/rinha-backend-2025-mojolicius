@@ -1,21 +1,17 @@
-FROM debian:bookworm-slim
+FROM perl:5.36-slim as builder
 
-WORKDIR /opt/
+WORKDIR /opt
 
-COPY . .
-
+# Instala dependências do sistema e Perl em uma única camada
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libssl-dev \
-    libexpat1-dev \
-    libz-dev \
-    libpq-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    libssl-dev libexpat1-dev libz-dev libpq-dev build-essential \
+    && cpanm -n Mojolicious Mojo::Redis Mojo::UserAgent Mojo::Pg JSON DateTime \
+    && apt-get remove -y build-essential \
+    && apt-get autoremove -y && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* ~/.cpanm
 
-RUN cpan App::cpanminus
-
-RUN cpanm --no-test Mojolicious Mojo::Redis Mojo::UserAgent Mojo::IOLoop JSON Mojo::Pg DateTime
+# Copia o restante do projeto
+COPY . .
 
 EXPOSE 3000
 
