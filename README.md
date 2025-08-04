@@ -1,7 +1,8 @@
-# 🧘 Rinha de Backend 2025 
+# 🧘 Rinha de Backend 2025
 
 Resolvi desenvolver esse backend com uma linguagem que eu uso no dia a dia e sei que não é mais tão popular hoje em dia, então queria ver o que eu era capaz de fazer com as restrições física de máquina e um bom e velho Mojolicious
-## 🚀 Tecnologias 
+
+## 🚀 Tecnologias
 
 **- Linguagem:** Perl
 **- Framework:** Mojolicious
@@ -10,7 +11,6 @@ Resolvi desenvolver esse backend com uma linguagem que eu uso no dia a dia e sei
 **- Load balancer:** NGNIX
 **- Orquestração:** Docker + Docker Compose
 
-
 ## ♟️ Estratégia
 
 Dois workers, um pra sempre verificar a cada 5 segundos, decidir qual é o melhor serviço de pagamento e postar no redis. Outro worker para fazer o processamento das requests POST para adicionar um pagamento.
@@ -18,3 +18,10 @@ Dois workers, um pra sempre verificar a cada 5 segundos, decidir qual é o melho
 ## Link do Repo
 
 [Repositório do Github](https://github.com/GaNardelli/rinha-backend-2025-mojolicius)
+
+## Rodando o projeto
+
+Basta fazer um git clone do projeto e rodar um docker compose up
+
+```
+bash: docker compose up
