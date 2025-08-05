@@ -8,6 +8,9 @@ use Mojo::IOLoop;
 use Mojo::Redis;
 use Mojo::Pg;
 
+my $BUFFER_MAX_SIZE = 100;
+my $FLUSH_INTERVAL = 0.5;
+
 # Setup
 my $postgres_dsn = $ENV{"POSTGRES_DSN"} // 'postgresql://monk:rinha_2025@localhost:5432/payments';
 my $redis_url    = $ENV{"APP_ENV"} && $ENV{"APP_ENV"} eq 'docker'
@@ -15,16 +18,43 @@ my $redis_url    = $ENV{"APP_ENV"} && $ENV{"APP_ENV"} eq 'docker'
   : 'redis://localhost:6379';
 
 my $postgres = Mojo::Pg->new($postgres_dsn);
-my $database = $postgres->db;
 
 my $redis = Mojo::Redis->new($redis_url);
-my $ua = Mojo::UserAgent->new->inactivity_timeout(3);
+my $ua = Mojo::UserAgent->new();
 
 # Fallback porta local
 my $payment_ports = {
   default  => 8001,
   fallback => 8002
 };
+
+my @buffer;
+my $flushing = 0;
+
+sub flush_buffer {
+    return if $flushing;
+    return if @buffer <= 0;
+    $flushing = 1;
+    Mojo::IOLoop->next_tick(sub {
+        eval {
+            my $database = $postgres->db;
+            my $tx = $database->begin;
+            my $placeholders = join(', ', map { '(?, ?, ?, ?)' } @buffer);
+            my @values = map { @$_{qw/correlation_id amount requested_at processor/} } @buffer;
+            $database->query(
+                "INSERT INTO payments (correlation_id, amount, requested_at, processor) VALUES $placeholders",
+                @values
+            );
+            $tx->commit;
+            @buffer = ();
+        };
+        warn $@ if $@;
+        $flushing = 0;
+    });
+    return;
+}
+
+Mojo::IOLoop->recurring($FLUSH_INTERVAL => \&flush_buffer);
 
 # Loop de polling da fila Redis
 sub wait_for_next_message {
@@ -70,12 +100,14 @@ sub wait_for_next_message {
                 # warn Dumper($tx->result);
                 if ($res->is_success) {
                     eval {
-                    $database->insert('payments', {
-                        correlation_id => $send_payload->{correlationId},
-                        amount => $send_payload->{amount},
-                        requested_at => $actual_time,
-                        processor => $best_processor->{payment_processor}
-                    });
+                        push @buffer, {
+                            correlation_id => $send_payload->{correlationId},
+                            amount => $send_payload->{amount},
+                            requested_at => $actual_time,
+                            processor => $best_processor->{payment_processor}
+                        };
+                        
+                        flush_buffer() if @buffer >= $BUFFER_MAX_SIZE;
                     # warn "Processado e inserido: $send_payload->{correlationId}";
                     } or do {
                         # warn "Falha no insert no Postgres: $@"
@@ -98,6 +130,6 @@ sub wait_for_next_message {
 
 # Inicia loop
 Mojo::IOLoop->timer(3 => sub {
-    wait_for_next_message();
+    wait_for_next_message() for (1..10);
 });
 Mojo::IOLoop->start unless Mojo::IOLoop->is_running;

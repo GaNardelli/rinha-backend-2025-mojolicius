@@ -12,26 +12,26 @@ use lib curfile->dirname->sibling('lib')->to_string;
 
 my $redis_url = defined($ENV{"APP_ENV"}) && $ENV{"APP_ENV"} eq 'docker' ? 'redis://redis:6379' : 'redis://localhost:6379';
 my $redis = Mojo::Redis->new($redis_url);
+my $postgres = Mojo::Pg->new($ENV{"POSTGRES_DSN"});
 
 post '/payments' => sub ($c) {
   my $json_params = $c->req->json;
   my $correlationId = $json_params->{'correlationId'};
   my $amount = $json_params->{'amount'};
-  return $c->render(json => { error => 'Missing correlationId' }, status => 400) unless $correlationId;
-  return $c->render(json => { error => 'Missing correct amount' }, status => 500) if !looks_like_number($amount);
+  return $c->render(json => { data => 'Missing correlationId' }, status => 400) unless $correlationId;
+  return $c->render(json => { data => 'Missing correct amount' }, status => 400) if !looks_like_number($amount);
   my $pubsub = $redis->pubsub;
   my $db = $pubsub->db;
   $db->lpush('payment_process_queue', JSON::encode_json {correlationId => $correlationId, amount => $amount}, sub {
     my ($db, $err, $res) = @_;
-    return $c->render(json => { status => 'queued' }, status => 500) if $err;
+    return $c->render(json => { data => 'queued' }, status => 500) if $err;
+    $c->render(json => { data => 'queued' }, status => 200);
   });
-  $c->render(json => { status => 'queued' }, status => 200);
 };
 
 get '/payments-summary' => sub ($c) {
   my $from = defined $c->param('from') ? $c->param('from') : '';
   my $to = defined $c->param('to') ?  $c->param('to') : '';
-  my $postgres = Mojo::Pg->new($ENV{"POSTGRES_DSN"});
   my $database = $postgres->db;
   my @binds;
   my $query = "SELECT json_object_agg(processor, summary) AS result
