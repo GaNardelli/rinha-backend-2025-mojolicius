@@ -9,7 +9,7 @@ use Mojo::Redis;
 use Mojo::Pg;
 
 my $BUFFER_MAX_SIZE = 100;
-my $FLUSH_INTERVAL = 0.5;
+my $FLUSH_INTERVAL = 0.2;
 
 # Setup
 my $postgres_dsn = $ENV{"POSTGRES_DSN"} // 'postgresql://monk:rinha_2025@localhost:5432/payments';
@@ -35,22 +35,20 @@ sub flush_buffer {
     return if $flushing;
     return if @buffer <= 0;
     $flushing = 1;
-    Mojo::IOLoop->next_tick(sub {
-        eval {
-            my $database = $postgres->db;
-            my $tx = $database->begin;
-            my $placeholders = join(', ', map { '(?, ?, ?, ?)' } @buffer);
-            my @values = map { @$_{qw/correlation_id amount requested_at processor/} } @buffer;
-            $database->query(
-                "INSERT INTO payments (correlation_id, amount, requested_at, processor) VALUES $placeholders",
-                @values
-            );
-            $tx->commit;
-            @buffer = ();
-        };
-        warn $@ if $@;
-        $flushing = 0;
-    });
+    my $placeholders = join(', ', map { '(?, ?, ?, ?)' } @buffer);
+    my @values = map { @$_{qw/correlation_id amount requested_at processor/} } @buffer;
+    eval {
+        my $database = $postgres->db;
+        my $tx = $database->begin;
+        $database->query(
+            "INSERT INTO payments (correlation_id, amount, requested_at, processor) VALUES $placeholders",
+            @values
+        );
+        $tx->commit;
+        @buffer = ();
+    };
+    # warn $@ if $@;
+    $flushing = 0;
     return;
 }
 
@@ -58,7 +56,7 @@ Mojo::IOLoop->recurring($FLUSH_INTERVAL => \&flush_buffer);
 
 # Loop de polling da fila Redis
 sub wait_for_next_message {
-    my $promise = $redis->db->brpop_p('payment_process_queue', 0)->then(sub {
+    my $promise = $redis->db->lpop_p('payment_process_queue')->then(sub {
         my ($payload) = @_;
         # warn "Callback do brpop chamado\n";
         return wait_for_next_message() unless defined $payload;
@@ -108,7 +106,14 @@ sub wait_for_next_message {
                         };
                         
                         flush_buffer() if @buffer >= $BUFFER_MAX_SIZE;
-                    # warn "Processado e inserido: $send_payload->{correlationId}";
+                        # warn "Processado e inserido: $send_payload->{correlationId}";
+                        # my $database = $postgres->db;
+                        # $database->insert('payments', {
+                        #     correlation_id => $send_payload->{correlationId},
+                        #     amount => $send_payload->{amount},
+                        #     requested_at => $actual_time,
+                        #     processor => $best_processor->{payment_processor}
+                        # });
                     } or do {
                         # warn "Falha no insert no Postgres: $@"
                     };

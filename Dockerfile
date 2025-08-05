@@ -1,4 +1,4 @@
-FROM perl:5.36-slim as builder
+FROM perl:5.36-slim AS builder
 
 WORKDIR /opt
 
