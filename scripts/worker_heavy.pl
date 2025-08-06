@@ -9,7 +9,7 @@ use Mojo::Redis;
 use Mojo::Pg;
 
 my $BUFFER_MAX_SIZE = 100;
-my $FLUSH_INTERVAL = 0.2;
+my $FLUSH_INTERVAL = 0.5;
 
 # Setup
 my $postgres_dsn = $ENV{"POSTGRES_DSN"} // 'postgresql://monk:rinha_2025@localhost:5432/payments';
