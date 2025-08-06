@@ -34,30 +34,32 @@ get '/payments-summary' => sub ($c) {
   my $to = defined $c->param('to') ?  $c->param('to') : '';
   my $database = $postgres->db;
   my @binds;
-  my $query = "SELECT json_object_agg(processor, summary) AS result
-                FROM (
-                  SELECT 
-                    processor,
-                    json_build_object(
-                      'totalRequests', COUNT(*)::INT,
-                      'totalAmount', ROUND(SUM(amount)::numeric, 2)
-                    ) AS summary
-                  FROM payments
-                  WHERE 1=1
-                  ";
+  my $query = "
+    SELECT json_object_agg(processor, summary) AS result
+    FROM (
+      SELECT 
+        p.processor,
+        json_build_object(
+          'totalRequests', COUNT(payments.processor)::INT,
+          'totalAmount', COALESCE(ROUND(SUM(payments.amount)::numeric, 2), 0)
+        ) AS summary
+      FROM (VALUES ('default'), ('fallback')) AS p(processor)
+      LEFT JOIN payments ON payments.processor = p.processor
+  ";
   if (defined $from && $from ne '') {
     push @binds, $from;
-    $query .= " AND requested_at >= ? ";
+    $query .= " AND payments.requested_at >= ? ";
   }
   if (defined $to && $to ne '') {
     push @binds, $to;
-    $query .= " AND requested_at <= ? ";
+    $query .= " AND payments.requested_at <= ? ";
   }
-  $query .= " GROUP BY processor
-                ) AS grouped";
+  $query .= "
+      GROUP BY p.processor
+    ) AS final_summary
+  ";
   my $result = $database->query($query, @binds)->hash;
-  my $parsed = eval { decode_json $result->{result} } || {};
-  # warn "Sent report: " . Dumper($parsed);
+  my $parsed = decode_json $result->{result} || {};
   $c->render(json => $parsed, status => 200);
 };
 

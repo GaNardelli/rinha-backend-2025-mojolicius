@@ -135,6 +135,6 @@ sub wait_for_next_message {
 
 # Inicia loop
 Mojo::IOLoop->timer(3 => sub {
-    wait_for_next_message() for (1..10);
+    wait_for_next_message() for (1..20);
 });
 Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
