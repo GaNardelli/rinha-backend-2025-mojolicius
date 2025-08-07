@@ -1,7 +1,6 @@
 #!/usr/bin/env perl
 use strict;
 use JSON;
-use DateTime;
 use Data::Dumper;
 use Mojo::UserAgent;
 use Mojo::IOLoop;
@@ -32,8 +31,9 @@ my @buffer;
 my $flushing = 0;
 
 sub flush_buffer {
-    return if $flushing;
+    return if $flushing == 1;
     return if @buffer <= 0;
+    # warn "Bulk inserting " . scalar(@buffer) ." registers";
     $flushing = 1;
     my $placeholders = join(', ', map { '(?, ?, ?, ?)' } @buffer);
     my @values = map { @$_{qw/correlation_id amount requested_at processor/} } @buffer;
@@ -41,18 +41,24 @@ sub flush_buffer {
         my $database = $postgres->db;
         my $tx = $database->begin;
         $database->query(
-            "INSERT INTO payments (correlation_id, amount, requested_at, processor) VALUES $placeholders",
+            "INSERT INTO payments (correlation_id, amount, requested_at, processor) 
+            VALUES $placeholders
+            ON CONFLICT (correlation_id) DO NOTHING",
             @values
         );
         $tx->commit;
-        @buffer = ();
     };
+    @buffer = ();
     # warn $@ if $@;
     $flushing = 0;
+    # warn "Bulk insert completed.";
     return;
 }
 
-Mojo::IOLoop->recurring($FLUSH_INTERVAL => \&flush_buffer);
+Mojo::IOLoop->recurring($FLUSH_INTERVAL => sub { 
+    # warn "Flushing " . scalar(@buffer) ." registers";
+    flush_buffer();
+});
 
 # Loop de polling da fila Redis
 sub wait_for_next_message {
@@ -85,8 +91,8 @@ sub wait_for_next_message {
             my $send_payload = {
                 correlationId => $message->{correlationId},
                 amount => $message->{amount},
+                requested_at => $message->{requested_at}
             };
-            my $actual_time = DateTime->now->iso8601() . 'Z';
             # warn "Send Payload: " . Dumper($send_payload);
             # warn "Best Processor URL: $best_processor->{url}";
             # warn "Best Processor payment_processor: $best_processor->{payment_processor}";
@@ -101,7 +107,7 @@ sub wait_for_next_message {
                         push @buffer, {
                             correlation_id => $send_payload->{correlationId},
                             amount => $send_payload->{amount},
-                            requested_at => $actual_time,
+                            requested_at => $send_payload->{requested_at},
                             processor => $best_processor->{payment_processor}
                         };
                         
@@ -111,7 +117,7 @@ sub wait_for_next_message {
                         # $database->insert('payments', {
                         #     correlation_id => $send_payload->{correlationId},
                         #     amount => $send_payload->{amount},
-                        #     requested_at => $actual_time,
+                        #     requested_at => $send_payload->{requested_at},
                         #     processor => $best_processor->{payment_processor}
                         # });
                     } or do {
@@ -134,7 +140,7 @@ sub wait_for_next_message {
 }
 
 # Inicia loop
-Mojo::IOLoop->timer(3 => sub {
-    wait_for_next_message() for (1..20);
+Mojo::IOLoop->timer(0 => sub {
+    wait_for_next_message() for (1..10);
 });
 Mojo::IOLoop->start unless Mojo::IOLoop->is_running;

@@ -4,11 +4,10 @@ use warnings;
 use Mojolicious::Lite -signatures;
 use JSON;
 use Scalar::Util qw(looks_like_number);
+use DateTime;
 use Mojo::Redis;
 use Mojo::Pg;
 use Data::Dumper;
-use Mojo::File qw(curfile);
-use lib curfile->dirname->sibling('lib')->to_string;
 
 my $redis_url = defined($ENV{"APP_ENV"}) && $ENV{"APP_ENV"} eq 'docker' ? 'redis://redis:6379' : 'redis://localhost:6379';
 my $redis = Mojo::Redis->new($redis_url);
@@ -22,7 +21,9 @@ post '/payments' => sub ($c) {
   return $c->render(json => { data => 'Missing correct amount' }, status => 400) if !looks_like_number($amount);
   my $pubsub = $redis->pubsub;
   my $db = $pubsub->db;
-  $db->lpush('payment_process_queue', JSON::encode_json {correlationId => $correlationId, amount => $amount}, sub {
+  my $requested_at = DateTime->now(time_zone => 'UTC')->iso8601();
+  warn Dumper({correlationId => $correlationId, amount => $amount, requested_at => $requested_at});
+  $db->lpush('payment_process_queue', JSON::encode_json {correlationId => $correlationId, amount => $amount, requested_at => $requested_at}, sub {
     my ($db, $err, $res) = @_;
     return $c->render(json => { data => 'queued' }, status => 500) if $err;
     $c->render(json => { data => 'queued' }, status => 200);
@@ -32,6 +33,8 @@ post '/payments' => sub ($c) {
 get '/payments-summary' => sub ($c) {
   my $from = defined $c->param('from') ? $c->param('from') : '';
   my $to = defined $c->param('to') ?  $c->param('to') : '';
+  warn "To: $to";
+  warn "From: $from";
   my $database = $postgres->db;
   my @binds;
   my $query = "
@@ -41,7 +44,7 @@ get '/payments-summary' => sub ($c) {
         p.processor,
         json_build_object(
           'totalRequests', COUNT(payments.processor)::INT,
-          'totalAmount', COALESCE(ROUND(SUM(payments.amount)::numeric, 2), 0)
+          'totalAmount', COALESCE(ROUND(SUM(payments.amount)::NUMERIC(12,2), 2), 0.0)
         ) AS summary
       FROM (VALUES ('default'), ('fallback')) AS p(processor)
       LEFT JOIN payments ON payments.processor = p.processor
@@ -60,6 +63,7 @@ get '/payments-summary' => sub ($c) {
   ";
   my $result = $database->query($query, @binds)->hash;
   my $parsed = decode_json $result->{result} || {};
+  warn Dumper($parsed);
   $c->render(json => $parsed, status => 200);
 };
 
